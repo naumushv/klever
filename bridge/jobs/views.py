@@ -39,7 +39,7 @@ from users.models import User
 from reports.models import ReportComponent
 from reports.UploadReport import UploadReport, CollapseReports
 from reports.comparison import can_compare
-from reports.utils import FilesForCompetitionArchive
+from reports.utils import StaticVerifierInputFilesArchive
 from service.utils import StartJobDecision, StopDecision, GetJobsProgresses
 
 import jobs.utils
@@ -288,15 +288,15 @@ class ReplaceJobFileView(LoggedCallMixin, Bview.JsonView):
 
 
 @method_decorator(login_required, name='dispatch')
-class DownloadFilesForCompetition(LoggedCallMixin, SingleObjectMixin, Bview.StreamingResponsePostView):
+class DownloadStaticVerifierInputFiles(LoggedCallMixin, SingleObjectMixin, Bview.StreamingResponsePostView):
     model = Job
-    file_name = 'svcomp.zip'
+    file_name = 'static_verifier_input_files.zip'
 
     def get_generator(self):
         self.object = self.get_object()
-        if not jobs.utils.JobAccess(self.request.user, self.object).can_dfc():
+        if not jobs.utils.JobAccess(self.request.user, self.object).can_download_static_verifier_input_files():
             raise BridgeException(code=400)
-        return FilesForCompetitionArchive(self.object, json.loads(self.request.POST['filters']))
+        return StaticVerifierInputFilesArchive(self.object, json.loads(self.request.POST['filters']))
 
 
 @method_decorator(login_required, name='dispatch')

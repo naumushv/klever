@@ -58,7 +58,7 @@
                     <div class="ui inverted popup bottom left transition hidden">
                         <a id="upload_reports_btn" class="item{% if not job_access.can_upload_reports %} disabled{% endif %}">{% trans 'Upload' %}</a>
                         <a id="collapse_reports_btn" class="item{% if not job_access.can_collapse %} disabled{% endif %}">{% trans 'Collapse' %}</a>
-                        <a id="dfc_modal_show" class="item{% if not job_access.can_dfc %} disabled{% endif %}">{% trans 'Download files for competition' %}</a>
+                        <a id="download_static_verifier_input_files_modal_show" class="item{% if not job_access.can_download_static_verifier_input_files %} disabled{% endif %}">{% trans 'Download static verifier input files' %}</a>
                         <a id="clear_verifications_modal_show" class="item{% if not job_access.can_clear_verifications %} disabled{% endif %}">{% trans 'Clear verification files' %}</a>
                     </div>
                     <div class="right menu">
@@ -269,57 +269,57 @@
             </div>
         {% endif %}
 
-        {# Download files for competition modal #}
-        {% if job_access.can_dfc %}
-            <div id="dfc_modal" class="ui small dinamic modal">
+        {# Download static verifier input files modal #}
+        {% if job_access.can_download_static_verifier_input_files %}
+            <div id="download_static_verifier_input_files_modal" class="ui small dinamic modal">
                 <div class="ui header">{% trans 'Choose filters' %}</div>
                 <div class="content">
                     <div class="ui grid">
                         <div class="six wide column">
                             {% if reportdata.totals.unsafes > 0 %}
                                 <div class="ui checkbox">
-                                    <label for="dfc__u">{% trans 'Unsafes' %}</label>
-                                    <input id="dfc__u" type="checkbox">
+                                    <label for="download_static_verifier_input_files__u">{% trans 'Unsafes' %}</label>
+                                    <input id="download_static_verifier_input_files__u" type="checkbox" checked>
                                 </div>
                                 <br>
                             {% endif %}
                             {% if reportdata.totals.safes > 0 %}
                                 <div class="ui checkbox">
-                                    <label for="dfc__s">{% trans 'Safes' %}</label>
-                                    <input id="dfc__s" type="checkbox">
+                                    <label for="download_static_verifier_input_files__s">{% trans 'Safes' %}</label>
+                                    <input id="download_static_verifier_input_files__s" type="checkbox" checked>
                                 </div>
                                 <br>
                             {% endif %}
                             {% if reportdata.totals.unknowns > 0 %}
                                 <div class="ui checkbox">
-                                    <label for="dfc__f">{% trans 'Unknowns' %}</label>
-                                    <input id="dfc__f" type="checkbox">
+                                    <label for="download_static_verifier_input_files__f">{% trans 'Unknowns' %}</label>
+                                    <input id="download_static_verifier_input_files__f" type="checkbox" checked>
                                 </div>
                                 <br>
                             {% endif %}
                         </div>
-                        <div id="dfc_problems" class="ten wide column" style="display: none">
+                        <div id="download_static_verifier_input_files_problems" class="ten wide column">
                             {% if reportdata.problems|length %}
                                 <p><small>{% trans "If you don't choose unknowns' problems then all unknowns files will be downloaded" %}</small></p>
                             {% endif %}
                             {% for problem in reportdata.problems %}
                                 <div class="ui checkbox">
-                                    <label for="dfc__p__{{ problem.1 }}">{{ problem.0 }}</label>
-                                    <input id="dfc__p__{{ problem.1 }}" type="checkbox" value="{{ problem.1 }}">
+                                    <label for="download_static_verifier_input_files__p__{{ problem.1 }}">{{ problem.0 }}</label>
+                                    <input id="download_static_verifier_input_files__p__{{ problem.1 }}" type="checkbox" value="{{ problem.1 }}">
                                 </div>
                                 <br>
                             {% endfor %}
                         </div>
                         <div class="sixteen wide column right aligned">
                             <div class="ui buttons">
-                                <button id="dfc__confirm" class="ui green button">{% trans 'Download' %}</button>
-                                <button id="dfc__cancel" class="ui blue button">{% trans 'Cancel' %}</button>
+                                <button id="download_static_verifier_input_files__confirm" class="ui green button">{% trans 'Download' %}</button>
+                                <button id="download_static_verifier_input_files__cancel" class="ui blue button">{% trans 'Cancel' %}</button>
                             </div>
                         </div>
                     </div>
                 </div>
             </div>
-            <span id="error___dfc_notype" hidden>{% trans 'Choose at least one type of reports' %}</span>
+            <span id="error___download_static_verifier_input_files_notype" hidden>{% trans 'Choose at least one type of reports' %}</span>
         {% endif %}
         <span id="stop_autorefresh" hidden>{% trans 'Stop page autorefresh' %}</span>
         <span id="start_autorefresh" hidden>{% trans 'Start page autorefresh' %}</span>

@@ -117,49 +117,49 @@ function check_status(interval) {
     });
 }
 
-function activate_download_for_compet() {
-    var dfc_modal = $('#dfc_modal');
-    dfc_modal.modal({transition: 'slide down', autofocus: false, closable: false});
-    $('#dfc_modal_show').click(function () {
+function activate_download_static_verifier_input_files() {
+    var modal = $('#download_static_verifier_input_files_modal');
+    modal.modal({transition: 'slide down', autofocus: false, closable: false});
+    $('#download_static_verifier_input_files_modal_show').click(function () {
         if ($(this).hasClass('disabled')) return false;
         $('.browse').popup('hide');
-        dfc_modal.modal('show');
+        modal.modal('show');
     });
-    dfc_modal.find('.ui.checkbox').checkbox();
-    $('#dfc__f').parent().checkbox({
+    modal.find('.ui.checkbox').checkbox();
+    $('#download_static_verifier_input_files__f').parent().checkbox({
         onChecked: function () {
-            $('#dfc_problems').show();
+            $('#download_static_verifier_input_files_problems').show();
         },
         onUnchecked: function () {
-            $('#dfc_problems').hide();
+            $('#download_static_verifier_input_files_problems').hide();
         }
     });
-    $('#dfc__cancel').click(function () {
-        $('#dfc_modal').modal('hide');
+    $('#download_static_verifier_input_files__cancel').click(function () {
+        $('#download_static_verifier_input_files_modal').modal('hide');
     });
-    $('#dfc__confirm').click(function () {
-        var svcomp_filters = [];
-        if ($('#dfc__u').parent().checkbox('is checked')) {
-            svcomp_filters.push('u');
+    $('#download_static_verifier_input_files__confirm').click(function () {
+        var filters = [];
+        if ($('#download_static_verifier_input_files__u').parent().checkbox('is checked')) {
+            filters.push('u');
         }
-        if ($('#dfc__s').parent().checkbox('is checked')) {
-            svcomp_filters.push('s');
+        if ($('#download_static_verifier_input_files__s').parent().checkbox('is checked')) {
+            filters.push('s');
         }
-        if ($('#dfc__f').parent().checkbox('is checked')) {
+        if ($('#download_static_verifier_input_files__f').parent().checkbox('is checked')) {
             var unknowns_filters = [];
-            $('input[id^="dfc__p__"]').each(function () {
+            $('input[id^="download_static_verifier_input_files__p__"]').each(function () {
                 if ($(this).parent().checkbox('is checked')) {
                     unknowns_filters.push($(this).val());
                 }
             });
-            svcomp_filters.push(unknowns_filters);
+            filters.push(unknowns_filters);
         }
-        if (svcomp_filters.length == 0) {
-            err_notify($('#error___dfc_notype').text());
+        if (filters.length == 0) {
+            err_notify($('#error___download_static_verifier_input_files_notype').text());
         }
         else {
-            $('#dfc_modal').modal('hide');
-            $.redirectPost('/jobs/downloadcompetfile/' + $('#job_id').val() + '/', {'filters': JSON.stringify(svcomp_filters)});
+            $('#download_static_verifier_input_files_modal').modal('hide');
+            $.redirectPost('/jobs/download_static_verifier_input_files/' + $('#job_id').val() + '/', {'filters': JSON.stringify(filters)});
         }
     });
 
@@ -248,7 +248,7 @@ $(document).ready(function () {
     });
 
     init_files_tree('#filestree', $('#job_id').val(), $('#job_version').val());
-    activate_download_for_compet();
+    activate_download_static_verifier_input_files();
     activate_run_history();
     init_versions_list();
 

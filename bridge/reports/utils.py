@@ -756,8 +756,8 @@ class AttrData:
                 self._attrs[(a.name.name, a.value)] = a.id
 
 
-class FilesForCompetitionArchive:
-    obj_attr = 'Program fragment'
+class StaticVerifierInputFilesArchive:
+    program_fragment_attr = 'Program fragment'
     requirement_attr = 'Requirement'
 
     def __init__(self, job, filters):
@@ -765,6 +765,7 @@ class FilesForCompetitionArchive:
             self.root = ReportRoot.objects.get(job=job)
         except ObjectDoesNotExist:
             raise BridgeException(_('The job is not decided'))
+        self._job_name = job.name
         self._attrs = self.__get_attrs()
         self._archives = self.__get_archives()
         self.filters = filters
@@ -799,7 +800,7 @@ class FilesForCompetitionArchive:
 
     def __get_attrs(self):
         names = {}
-        for a_name in AttrName.objects.filter(name__in=[self.obj_attr, self.requirement_attr]):
+        for a_name in AttrName.objects.filter(name__in=[self.program_fragment_attr, self.requirement_attr]):
             names[a_name.id] = a_name.name
 
         attrs = {}
@@ -815,15 +816,15 @@ class FilesForCompetitionArchive:
 
     def __add_archive(self, r_type, r_id, p_id):
         if p_id in self._archives and r_id in self._attrs \
-                and self.obj_attr in self._attrs[r_id] \
+                and self.program_fragment_attr in self._attrs[r_id] \
                 and self.requirement_attr in self._attrs[r_id]:
-
-            ver_obj = self._attrs[r_id][self.obj_attr].replace('~', 'HOME').replace('/', '---')
-            ver_requirement = self._attrs[r_id][self.requirement_attr].replace(':', '-')
-            dirname = 'Unknowns' if r_type == 'f' else 'Unsafes' if r_type == 'u' else 'Safes'
-
             self._archives_to_upload.append(
-                (self._archives[p_id], '{0}/{1}__{2}__{3}'.format(dirname, r_type, ver_requirement, ver_obj))
+                (self._archives[p_id],
+                 '{0}/{1}/{2} - {3}'.format(self._job_name,
+                                            'Unknowns' if r_type == 'f' else 'Unsafes' if r_type == 'u' else 'Safes',
+                                            self._attrs[r_id][self.program_fragment_attr].replace('/', '---'),
+                                            self._attrs[r_id][self.requirement_attr])
+                )
             )
 
     def __get_archives_to_upload(self):

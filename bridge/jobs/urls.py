@@ -45,7 +45,7 @@ urlpatterns = [
     path('getfilecontent/<slug:hashsum>/', views.GetFileContentView.as_view()),
     path('get_files_diff/<slug:hashsum1>/<slug:hashsum2>/', views.GetFilesDiffView.as_view()),
     path('replace_job_file/<int:job_id>/', views.ReplaceJobFileView.as_view()),
-    path('downloadcompetfile/<int:pk>/', views.DownloadFilesForCompetition.as_view(), name='download_file_for_compet'),
+    path('download_static_verifier_input_files/<int:pk>/', views.DownloadStaticVerifierInputFiles.as_view(), name='download_static_verifier_input_files'),
 
     # Download/upload actions
     path('downloadjob/<int:pk>/', views.DownloadJobView.as_view(), name='download'),

@@ -266,7 +266,7 @@ class JobAccess:
         except ObjectDoesNotExist:
             return False
 
-    def can_dfc(self):
+    def can_download_static_verifier_input_files(self):
         return self.job is not None and self.job.status not in [JOB_STATUS[0][0], JOB_STATUS[1][0]]
 
     def __get_jobs_with_roles(self, roles):
