@@ -40,10 +40,13 @@ JOB_ARCHIVE = 'job.zip'
 NECESSARY_FILES = [
     'job.json',
     'tasks.json',
-    'program fragmentation.json',
-    'verifier profiles.json',
-    'specifications/base.json'
+    'verifier profiles.json'
 ]
+CODE_COVERAGE_DETAILS_MAP = {
+    '0': 'Original C source files',
+    '1': 'C source files including models',
+    '2': 'All source files'
+}
 
 
 def start_jobs(core_obj, vals):
@@ -65,27 +68,27 @@ def start_jobs(core_obj, vals):
     common_components_conf = __get_common_components_conf(core_obj.logger, core_obj.conf)
     core_obj.logger.info("Start results arranging and reporting subcomponent")
 
-    core_obj.logger.info('Get job class')
-    if 'Class' in common_components_conf:
-        job_type = common_components_conf['Class']
+    core_obj.logger.info('Get project')
+    if 'project' in common_components_conf:
+        project = common_components_conf['project']
     else:
-        raise KeyError('Specify job class within job.json')
-    core_obj.logger.debug('Job class is "{0}"'.format(job_type))
+        raise KeyError('Specify project within job.json')
+    core_obj.logger.debug('Project is "{0}"'.format(project))
 
-    if 'Common' in common_components_conf and 'Sub-jobs' not in common_components_conf:
-        raise KeyError('You can not specify common sub-jobs configuration without sub-jobs themselves')
-
-    if 'Common' in common_components_conf:
-        common_components_conf.update(common_components_conf['Common'])
-        del (common_components_conf['Common'])
-
-    # Save for next components specifications desc and verifiers profiles
-    common_components_conf['requirements DB'] = os.path.abspath(
-        core.utils.find_file_or_dir(core_obj.logger, os.path.curdir, 'specifications/base.json'))
-    common_components_conf['verifier profiles DB'] = os.path.abspath(
+    # Save bases for components.
+    common_components_conf['specifications dir'] = os.path.abspath(
+        core.utils.find_file_or_dir(core_obj.logger, os.path.curdir, 'specifications'))
+    common_components_conf['specifications base'] = os.path.abspath(
+        core.utils.find_file_or_dir(core_obj.logger, os.path.curdir,
+                                    os.path.join('specifications',
+                                                 '{0}.json'.format(common_components_conf['project']))))
+    common_components_conf['verifier profiles base'] = os.path.abspath(
         core.utils.find_file_or_dir(core_obj.logger, os.path.curdir, 'verifier profiles.json'))
-    common_components_conf['program fragmentation DB'] = os.path.abspath(
-        core.utils.find_file_or_dir(core_obj.logger, os.path.curdir, 'program fragmentation.json'))
+    common_components_conf['program fragments base'] = os.path.abspath(
+        core.utils.find_file_or_dir(core_obj.logger, os.path.curdir, 'fragmentation sets'))
+
+    common_components_conf['code coverage details'] = CODE_COVERAGE_DETAILS_MAP[
+        common_components_conf['code coverage details']]
 
     subcomponents = []
     try:
@@ -93,28 +96,29 @@ def start_jobs(core_obj, vals):
 
         pc = PW(core_obj.conf, core_obj.logger, core_obj.ID, core_obj.callbacks, core_obj.mqs, vals,
                 separate_from_parent=False, include_child_resources=True, session=core_obj.session,
-                total_subjobs=(len(common_components_conf['Sub-jobs']) if 'Sub-jobs' in common_components_conf else 0))
+                total_subjobs=(len(common_components_conf['sub-jobs']) if 'sub-jobs' in common_components_conf else 0))
         pc.start()
         subcomponents.append(pc)
 
+        # TODO: split collecting total code coverage for sub-jobs. Otherwise there is too much redundant data.
         if 'collect total code coverage' in common_components_conf and \
                 common_components_conf['collect total code coverage']:
             def after_process_finished_task(context):
                 coverage_info_file = os.path.join(context.conf['main working directory'], context.coverage_info_file)
                 if os.path.isfile(coverage_info_file):
-                    context.mqs['requirements and coverage info files'].put({
+                    context.mqs['req spec ids and coverage info files'].put({
                         'sub-job identifier': context.conf['sub-job identifier'],
-                        'requirement': context.requirement,
+                        'req spec id': context.req_spec_id,
                         'coverage info file': coverage_info_file
                     })
 
             def after_launch_sub_job_components(context):
                 context.logger.debug('Put "{0}" sub-job identifier for finish coverage'.format(context.id))
-                context.mqs['requirements and coverage info files'].put({
+                context.mqs['req spec ids and coverage info files'].put({
                     'sub-job identifier': context.common_components_conf['sub-job identifier']
                 })
 
-            cr = JCR(core_obj.conf, core_obj.logger, core_obj.ID, core_obj.callbacks, core_obj.mqs, vals,
+            cr = JCR(common_components_conf, core_obj.logger, core_obj.ID, core_obj.callbacks, core_obj.mqs, vals,
                      separate_from_parent=False, include_child_resources=True, queues_to_terminate=queues_to_terminate)
             # This can be done only in this module otherwise callbacks will be missed
             core.components.set_component_callbacks(core_obj.logger, Job,
@@ -122,19 +126,18 @@ def start_jobs(core_obj, vals):
             cr.start()
             subcomponents.append(cr)
 
-        if 'Sub-jobs' in common_components_conf:
-            if __check_ideal_verdicts(common_components_conf):
-                ra = RA(core_obj.conf, core_obj.logger, core_obj.ID, core_obj.callbacks, core_obj.mqs,
-                        vals, separate_from_parent=False, include_child_resources=True,
-                        job_type=job_type, queues_to_terminate=queues_to_terminate)
-                ra.start()
-                subcomponents.append(ra)
+        if 'extra results processing' in common_components_conf:
+            ra = REP(common_components_conf, core_obj.logger, core_obj.ID, core_obj.callbacks, core_obj.mqs, vals,
+                     separate_from_parent=False, include_child_resources=True, queues_to_terminate=queues_to_terminate)
+            ra.start()
+            subcomponents.append(ra)
 
+        if 'sub-jobs' in common_components_conf:
             core_obj.logger.info('Decide sub-jobs')
             sub_job_solvers_num = core.utils.get_parallel_threads_num(core_obj.logger, common_components_conf,
                                                                       'Sub-jobs processing')
             core_obj.logger.debug('Sub-jobs will be decided in parallel by "{0}" solvers'.format(sub_job_solvers_num))
-            __solve_sub_jobs(core_obj, vals, common_components_conf, job_type,
+            __solve_sub_jobs(core_obj, vals, common_components_conf,
                              subcomponents + [core_obj.uploading_reports_process])
         else:
             job = Job(
@@ -144,7 +147,6 @@ def start_jobs(core_obj, vals):
                 work_dir=os.path.join(os.path.curdir, 'job'),
                 separate_from_parent=True,
                 include_child_resources=False,
-                job_type=job_type,
                 components_common_conf=common_components_conf)
             core.components.launch_workers(core_obj.logger, [job], subcomponents + [core_obj.uploading_reports_process])
             core_obj.logger.info("Finished main job")
@@ -165,17 +167,6 @@ def start_jobs(core_obj, vals):
     core_obj.logger.info('Jobs and arranging results reporter finished')
 
 
-def __check_ideal_verdicts(conf):
-    # Check that configuration has ideal verdicts sets for at least one sub-job
-    if 'ideal verdicts' in conf:
-        return True
-    if 'Sub-jobs' in conf:
-        for sj in conf['Sub-jobs']:
-            if 'ideal verdicts' in sj:
-                return True
-    return False
-
-
 def __get_common_components_conf(logger, conf):
     logger.info('Get components common configuration')
 
@@ -194,19 +185,19 @@ def __get_common_components_conf(logger, conf):
     return components_common_conf
 
 
-def __solve_sub_jobs(core_obj, vals, components_common_conf, job_type, subcomponents):
+def __solve_sub_jobs(core_obj, vals, components_common_conf, subcomponents):
     def constructor(number):
         # Sub-job configuration is based on common sub-jobs configuration.
         sub_job_components_common_conf = copy.deepcopy(components_common_conf)
-        del (sub_job_components_common_conf['Sub-jobs'])
+        del (sub_job_components_common_conf['sub-jobs'])
         sub_job_concrete_conf = core.utils.merge_confs(sub_job_components_common_conf,
-                                                       components_common_conf['Sub-jobs'][number])
+                                                       components_common_conf['sub-jobs'][number])
 
         job = SubJob(
             core_obj.conf, core_obj.logger, core_obj.ID, core_obj.callbacks, core_obj.mqs,
             vals,
             id=str(number),
-            work_dir=str(number),
+            work_dir='sub-job {0}'.format(number),
             attrs=[{
                 'name': 'Sub-job identifier',
                 'value': str(number),
@@ -215,9 +206,9 @@ def __solve_sub_jobs(core_obj, vals, components_common_conf, job_type, subcompon
                 # need even to know about them.
                 # From ancient time we tried to assign nice names to sub-jobs to distinguish them, in particular to be
                 # able to compare corresponding verification results. These names were based on sub-job configurations,
-                # e.g. they included commit hashes, requirement identifiers, module names, etc. Such the approach
-                # turned out to be inadequate since we had to add more and more information to sub-job names that
-                # involves source code changes and results in large working directories that look like these names.
+                # e.g. they included commit hashes, requirement specification identifiers, module names, etc. Such the
+                # approach turned out to be inadequate since we had to add more and more information to sub-job names
+                # that involves source code changes and results in large working directories that look like these names.
                 # After all we decided to use sub-job ordinal numbers to distinguish them uniquely (during a some time
                 # old style names were used in addition to these ordinal numbers). The only bad news is that in case of
                 # any changes in a global arrangement of sub-jobs, such as a new sub-job is added somewhere in the
@@ -227,7 +218,6 @@ def __solve_sub_jobs(core_obj, vals, components_common_conf, job_type, subcompon
             }],
             separate_from_parent=True,
             include_child_resources=False,
-            job_type=job_type,
             components_common_conf=sub_job_concrete_conf
         )
 
@@ -241,7 +231,7 @@ def __solve_sub_jobs(core_obj, vals, components_common_conf, job_type, subcompon
     subjob_queue = multiprocessing.Queue()
     # Initialize queue first
     core_obj.logger.debug('Initialize workqueue with sub-job identifiers')
-    for num in range(len(components_common_conf['Sub-jobs'])):
+    for num in range(len(components_common_conf['sub-jobs'])):
         subjob_queue.put(num)
     subjob_queue.put(None)
 
@@ -251,22 +241,19 @@ def __solve_sub_jobs(core_obj, vals, components_common_conf, job_type, subcompon
                                          components_common_conf['ignore failed sub-jobs'], subcomponents)
 
 
-class RA(core.components.Component):
+class REP(core.components.Component):
 
     def __init__(self, conf, logger, parent_id, callbacks, mqs, vals, id=None, work_dir=None, attrs=None,
-                 separate_from_parent=True, include_child_resources=False, job_type=None, queues_to_terminate=None):
-        super(RA, self).__init__(conf, logger, parent_id, callbacks, mqs, vals, id, work_dir, attrs,
-                                 separate_from_parent, include_child_resources)
-        self.job_type = job_type
+                 separate_from_parent=True, include_child_resources=False, queues_to_terminate=None):
+        super(REP, self).__init__(conf, logger, parent_id, callbacks, mqs, vals, id, work_dir, attrs,
+                                  separate_from_parent, include_child_resources)
         self.data = dict()
 
-        # Initialize callbacks
         self.mqs['verification statuses'] = multiprocessing.Queue()
         queues_to_terminate.append('verification statuses')
         self.__set_callbacks()
 
-    def report_results(self):
-        # Process exceptions like for uploading reports.
+    def process_results_extra(self):
         os.mkdir('results')
 
         while True:
@@ -280,7 +267,7 @@ class RA(core.components.Component):
             id_suffix, verification_result = self.__match_ideal_verdict(verification_status)
             sub_job_id = verification_status['sub-job identifier']
 
-            if self.job_type == 'Verification of Linux kernel modules':
+            if self.conf['extra results processing'] == 'testing':
                 # For testing jobs there can be several verification tasks for each sub-job, so for uniqueness of
                 # tasks and directories add identifier suffix in addition.
                 task_id = os.path.join(sub_job_id, id_suffix)
@@ -289,7 +276,7 @@ class RA(core.components.Component):
                     ' ("{0}")'.format(verification_result['comment'])
                     if verification_result['comment'] else ''))
                 results_dir = os.path.join('results', task_id)
-            elif self.job_type == 'Validation on commits in Linux kernel Git repositories':
+            elif self.conf['extra results processing'] == 'validation':
                 # For validation jobs we can't refer to sub-job identifier for additional identification of verification
                 # results because of most likely we will consider pairs of sub-jobs before and after corresponding bug
                 # fixes.
@@ -299,7 +286,8 @@ class RA(core.components.Component):
                 # the only verification task for each sub-job.
                 results_dir = os.path.join('results', sub_job_id)
             else:
-                raise NotImplementedError('Job class {!r} is not supported'.format(self.job_type))
+                raise NotImplementedError('Extra results processing {!r} is not supported'
+                                          .format(self.conf['extra results processing']))
 
             os.makedirs(results_dir)
 
@@ -314,15 +302,15 @@ class RA(core.components.Component):
                               self.conf['main working directory'],
                               results_dir)
 
-    main = report_results
+    main = process_results_extra
 
     def __set_callbacks(self):
 
         # TODO: these 3 functions are very similar, so, they should be merged.
         def after_plugin_fail_processing(context):
             context.mqs['verification statuses'].put({
-                'program fragment': context.program_fragment['id'],
-                'requirement': context.requirement,
+                'program fragment id': context.program_fragment_id,
+                'req spec id': context.req_spec_id,
                 'verdict': 'non-verifier unknown',
                 'sub-job identifier': context.conf['sub-job identifier'],
                 'ideal verdicts': context.conf['ideal verdicts'],
@@ -331,8 +319,8 @@ class RA(core.components.Component):
 
         def after_process_failed_task(context):
             context.mqs['verification statuses'].put({
-                'program fragment': context.program_fragment,
-                'requirement': context.requirement,
+                'program fragment id': context.program_fragment_id,
+                'req spec id': context.req_spec_id,
                 'verdict': context.verdict,
                 'sub-job identifier': context.conf['sub-job identifier'],
                 'ideal verdicts': context.conf['ideal verdicts'],
@@ -341,8 +329,8 @@ class RA(core.components.Component):
 
         def after_process_single_verdict(context):
             context.mqs['verification statuses'].put({
-                'program fragment': context.program_fragment,
-                'requirement': context.requirement,
+                'program fragment id': context.program_fragment_id,
+                'req spec id': context.req_spec_id,
                 'verdict': context.verdict,
                 'sub-job identifier': context.conf['sub-job identifier'],
                 'ideal verdicts': context.conf['ideal verdicts'],
@@ -365,50 +353,50 @@ class RA(core.components.Component):
 
             return False
 
-        program_fragment = verification_status['program fragment']
-        requirement = verification_status['requirement']
+        program_fragment_id = verification_status['program fragment id']
+        req_spec_id = verification_status['req spec id']
         ideal_verdicts = verification_status['ideal verdicts']
 
         matched_ideal_verdict = None
 
-        # Try to match exactly by both program fragment and requirement.
+        # Try to match exactly by both program fragment and requirements specification.
         for ideal_verdict in ideal_verdicts:
-            if match_attr(program_fragment, ideal_verdict.get('program fragment')) \
-                    and match_attr(requirement, ideal_verdict.get('requirement')):
+            if match_attr(program_fragment_id, ideal_verdict.get('program fragments')) \
+                    and match_attr(req_spec_id, ideal_verdict.get('requirements specification')):
                 matched_ideal_verdict = ideal_verdict
                 break
 
         # Try to match just by program fragment.
         if not matched_ideal_verdict:
             for ideal_verdict in ideal_verdicts:
-                if 'requirement' not in ideal_verdict \
-                        and match_attr(program_fragment, ideal_verdict.get('program fragment')):
+                if 'requirements specification' not in ideal_verdict \
+                        and match_attr(program_fragment_id, ideal_verdict.get('program fragments')):
                     matched_ideal_verdict = ideal_verdict
                     break
 
-        # Try to match just by requirement specification.
+        # Try to match just by requirements specification.
         if not matched_ideal_verdict:
             for ideal_verdict in ideal_verdicts:
-                if 'program fragment' not in ideal_verdict \
-                        and match_attr(requirement, ideal_verdict.get('requirement')):
+                if 'program fragments' not in ideal_verdict \
+                        and match_attr(req_spec_id, ideal_verdict.get('requirements specification')):
                     matched_ideal_verdict = ideal_verdict
                     break
 
         # If nothing of above matched.
         if not matched_ideal_verdict:
             for ideal_verdict in ideal_verdicts:
-                if 'program fragment' not in ideal_verdict and 'requirement' not in ideal_verdict:
+                if 'program fragments' not in ideal_verdict and 'requirements specification' not in ideal_verdict:
                     matched_ideal_verdict = ideal_verdict
                     break
 
         if not matched_ideal_verdict:
             raise ValueError(
-                'Could not match ideal verdict for program fragment "{0}" and requirement "{1}"'
-                .format(program_fragment, requirement))
+                'Could not match ideal verdict for program fragment "{0}" and requirements specification "{1}"'
+                .format(program_fragment_id, req_spec_id))
 
         # This suffix will help to distinguish sub-jobs easier.
-        id_suffix = os.path.join(program_fragment, requirement)\
-            if program_fragment and requirement else ''
+        id_suffix = os.path.join(program_fragment_id, req_spec_id)\
+            if program_fragment_id and req_spec_id else ''
 
         return id_suffix, {
             'verdict': verification_status['verdict'],
@@ -427,7 +415,7 @@ class RA(core.components.Component):
 
         # Identifier suffix clarifies bug nature without preventing relation of verification results, so, just add it
         # to bug identifier. Sometimes just this concatenation actually serves as unique identifier, e.g. when a bug
-        # identifier is just a commit hash, while an identifier suffix contains a program fragment and a requirement
+        # identifier is just a commit hash, while an identifier suffix contains a program fragment and a requirements
         # specification.
         bug_id = os.path.join(data['bug identifier'], id_suffix)
 
@@ -483,30 +471,28 @@ class RA(core.components.Component):
 
 
 class Job(core.components.Component):
-    SUPPORTED_JOB_TYPES = [
-        'Verification of userspace programs',
-        'Verification of Linux kernel modules',
-        'Validation on commits in Linux kernel Git repositories'
-    ]
-    JOB_CLASS_COMPONENTS = [
+    CORE_COMPONENTS = [
         'PFG',
         'VTG',
         'VRP'
     ]
 
     def __init__(self, conf, logger, parent_id, callbacks, mqs, vals, id=None, work_dir=None, attrs=None,
-                 separate_from_parent=True, include_child_resources=False, job_type=None, components_common_conf=None):
+                 separate_from_parent=True, include_child_resources=False, components_common_conf=None):
         super(Job, self).__init__(conf, logger, parent_id, callbacks, mqs, vals, id, work_dir, attrs,
                                   separate_from_parent, include_child_resources)
-        self.job_type = job_type
         self.common_components_conf = components_common_conf
+
+        if work_dir:
+            self.common_components_conf['additional sources directory'] = os.path.join(os.path.realpath(work_dir),
+                                                                                       'additional sources')
 
         self.clade = None
         self.components = []
         self.component_processes = []
 
     def decide_job_or_sub_job(self):
-        self.logger.info('Decide job/sub-job of type "{0}" with identifier "{1}"'.format(self.job_type, self.id))
+        self.logger.info('Decide job/sub-job "{0}"'.format(self.id))
 
         # This is required to associate verification results with particular sub-jobs.
         # Skip leading "/" since this identifier is used in os.path.join() that returns absolute path otherwise.
@@ -720,22 +706,18 @@ class Job(core.components.Component):
             os.remove('original sources.zip')
 
     def __get_job_or_sub_job_components(self):
-        self.logger.info('Get components for sub-job of type "{0}" with identifier "{1}"'.
-                         format(self.job_type, self.id))
-
-        if self.job_type not in self.SUPPORTED_JOB_TYPES:
-            raise NotImplementedError('Job class "{0}" is not supported'.format(self.job_type))
+        self.logger.info('Get components for sub-job "{0}"'.format(self.id))
 
         self.components = [getattr(importlib.import_module('.{0}'.format(component.lower()), 'core'), component) for
-                           component in self.JOB_CLASS_COMPONENTS]
+                           component in self.CORE_COMPONENTS]
 
         self.logger.debug('Components to be launched: "{0}"'.format(
             ', '.join([component.__name__ for component in self.components])))
 
     def launch_sub_job_components(self):
         """Has callbacks"""
-        self.logger.info('Launch components for sub-job of type "{0}" with identifier "{1}"'.
-                         format(self.job_type, self.id))
+        self.logger.info('Launch components for sub-job "{0}"'.format(self.id))
+
         for component in self.components:
             p = component(self.common_components_conf, self.logger, self.id, self.callbacks, self.mqs,
                           self.vals, separate_from_parent=True)

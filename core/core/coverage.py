@@ -88,7 +88,8 @@ def convert_coverage(merged_coverage_info, coverage_dir, pretty, src_files_info=
     if src_files_info:
         # Remove data for covered source files. It is out of interest, but we did not know these files earlier.
         for file_name in coverage_stats['coverage statistics']:
-            del src_files_info[file_name]
+            if file_name in src_files_info:
+                del src_files_info[file_name]
 
         for file_name, info in src_files_info.items():
             # TODO: it would be better to make this depending on code coverage completeness. But for this here we will need to know completeness and source directories in addition.
@@ -127,8 +128,8 @@ class JCR(core.components.Component):
                                   attrs, separate_from_parent, include_child_resources)
 
         # This function adds callbacks and it should work until we call it in the new process
-        self.mqs['requirements and coverage info files'] = multiprocessing.Queue()
-        queues_to_terminate.append('requirements and coverage info files')
+        self.mqs['req spec ids and coverage info files'] = multiprocessing.Queue()
+        queues_to_terminate.append('req spec ids and coverage info files')
         self.coverage = dict()
 
     def collect_total_coverage(self):
@@ -140,11 +141,12 @@ class JCR(core.components.Component):
         counters = dict()
         try:
             while True:
-                coverage_info = self.mqs['requirements and coverage info files'].get()
+                coverage_info = self.mqs['req spec ids and coverage info files'].get()
 
                 if coverage_info is None:
-                    self.logger.debug('Requirement coverage info files message queue was terminated')
-                    self.mqs['requirements and coverage info files'].close()
+                    self.logger.debug(
+                        'Requirement specification identifiers and coverage info files message queue was terminated')
+                    self.mqs['req spec ids and coverage info files'].close()
                     break
 
                 sub_job_id = coverage_info['sub-job identifier']
@@ -154,9 +156,9 @@ class JCR(core.components.Component):
                     if sub_job_id not in total_coverage_infos:
                         total_coverage_infos[sub_job_id] = dict()
                         arcfiles[sub_job_id] = dict()
-                    requirement = coverage_info['requirement']
-                    total_coverage_infos[sub_job_id].setdefault(requirement, {})
-                    arcfiles[sub_job_id].setdefault(requirement, {})
+                    req_spec_id = coverage_info['req spec id']
+                    total_coverage_infos[sub_job_id].setdefault(req_spec_id, {})
+                    arcfiles[sub_job_id].setdefault(req_spec_id, {})
 
                     if os.path.isfile(coverage_info['coverage info file']):
                         with open(coverage_info['coverage info file'], encoding='utf8') as fp:
@@ -167,19 +169,19 @@ class JCR(core.components.Component):
                             os.remove(os.path.join(self.conf['main working directory'],
                                                    coverage_info['coverage info file']))
 
-                        add_to_coverage(total_coverage_infos[sub_job_id][requirement], loaded_coverage_info)
+                        add_to_coverage(total_coverage_infos[sub_job_id][req_spec_id], loaded_coverage_info)
                         for file in loaded_coverage_info.values():
-                            arcfiles[sub_job_id][requirement][file[0]['file name']] = file[0]['arcname']
+                            arcfiles[sub_job_id][req_spec_id][file[0]['file name']] = file[0]['arcname']
                         del loaded_coverage_info
 
                         counters.setdefault(sub_job_id, dict())
-                        counters[sub_job_id].setdefault(requirement, 0)
-                        counters[sub_job_id][requirement] += 1
-                        if counters[sub_job_id][requirement] >= 10:
-                            self.__read_data(total_coverage_infos, sub_job_id, requirement)
-                            self.__save_data(total_coverage_infos, sub_job_id, requirement)
-                            self.__clean_data(total_coverage_infos, sub_job_id, requirement)
-                            counters[sub_job_id][requirement] = 0
+                        counters[sub_job_id].setdefault(req_spec_id, 0)
+                        counters[sub_job_id][req_spec_id] += 1
+                        if counters[sub_job_id][req_spec_id] >= 10:
+                            self.__read_data(total_coverage_infos, sub_job_id, req_spec_id)
+                            self.__save_data(total_coverage_infos, sub_job_id, req_spec_id)
+                            self.__clean_data(total_coverage_infos, sub_job_id, req_spec_id)
+                            counters[sub_job_id][req_spec_id] = 0
                     else:
                         self.logger.warning("There is no coverage file {!r}".
                                             format(coverage_info['coverage info file']))
@@ -189,39 +191,47 @@ class JCR(core.components.Component):
                     total_coverages = dict()
                     total_coverage_dirs = []
 
-                    for requirement in counters[sub_job_id]:
-                        self.__read_data(total_coverage_infos, sub_job_id, requirement)
-                        coverage_info = total_coverage_infos[sub_job_id][requirement]
+                    # This is ugly. But this should disappear after implementing TODO at core.job.start_jobs.
+                    sub_job_dir = 'job' if sub_job_id == '-' else 'sub-job {0}'.format(sub_job_id)
 
-                        # TODO: there are too many questions regarding code coverage for non-source files of total coverage. Moreover, there are no corresponding additional sources yet. So, let's just get rid of them.
-                        file_names_to_remove = list()
-                        for file_name in list(coverage_info.keys()):
-                            if not file_name.startswith('source files'):
-                                file_names_to_remove.append(file_name)
-                        for file_name_to_remove in file_names_to_remove:
-                            del(coverage_info[file_name_to_remove])
+                    for req_spec_id in counters[sub_job_id]:
+                        self.__read_data(total_coverage_infos, sub_job_id, req_spec_id)
+                        coverage_info = total_coverage_infos[sub_job_id][req_spec_id]
+                        total_coverage_dir = os.path.join(self.__get_total_cov_dir(sub_job_id, req_spec_id), 'report')
 
-                        total_coverage_dir = os.path.join(self.__get_total_cov_dir(sub_job_id, requirement), 'report')
-
-                        with open(os.path.join('job' if sub_job_id == '-' else sub_job_id,
-                                               'original sources basic information.json')) as fp:
+                        with open(os.path.join(sub_job_dir, 'original sources basic information.json')) as fp:
                             src_files_info = json.load(fp)
 
                         convert_coverage(coverage_info, total_coverage_dir, self.conf['keep intermediate files'],
                                          src_files_info)
                         total_coverage_dirs.append(total_coverage_dir)
 
-                        total_coverages[requirement] = core.utils.ArchiveFiles([total_coverage_dir])
-                        self.__save_data(total_coverage_infos, sub_job_id, requirement)
-                        self.__clean_data(total_coverage_infos, sub_job_id, requirement)
+                        total_coverages[req_spec_id] = core.utils.ArchiveFiles([total_coverage_dir])
+                        self.__save_data(total_coverage_infos, sub_job_id, req_spec_id)
+                        self.__clean_data(total_coverage_infos, sub_job_id, req_spec_id)
+
+                    # This isn't great to build component identifier in such the artificial way.
+                    # But otherwise we need to pass it everywhere like "sub-job identifier".
+                    report_id = os.path.join(os.path.sep, sub_job_id)
+
+                    if self.conf['code coverage details'] == 'All source files':
+                        core.utils.report(self.logger,
+                                          'patch',
+                                          {
+                                              'identifier': report_id,
+                                              'additional_sources': core.utils.ArchiveFiles(
+                                                  [os.path.join(sub_job_dir, 'additional sources')]),
+                                          },
+                                          self.mqs['report files'],
+                                          self.vals['report id'],
+                                          self.conf['main working directory'],
+                                          os.path.join('total coverages', sub_job_id))
 
                     core.utils.report(self.logger,
                                       'coverage',
                                       {
-                                          # This isn't great to build component identifier in such the artificial way.
-                                          # But otherwise we need to pass it everywhere like "sub-job identifier".
-                                          'identifier': os.path.join(os.path.sep, sub_job_id),
-                                          'coverage': total_coverages
+                                          'identifier': report_id,
+                                          'coverage': total_coverages,
                                       },
                                       self.mqs['report files'],
                                       self.vals['report id'],
@@ -306,8 +316,8 @@ class LCOV:
     FUNCTION_NAME_PREFIX = "FN:"
     PARIALLY_ALLOWED_EXT = ('.c', '.i', '.c.aux')
 
-    def __init__(self, conf, logger, coverage_file, clade, source_dirs, search_dirs, main_work_dir, coverage,
-                 coverage_id, coverage_info_dir, collect_functions, preprocessed_files=False):
+    def __init__(self, conf, logger, coverage_file, clade, source_dirs, search_dirs, main_work_dir, coverage_details,
+                 coverage_id, coverage_info_dir):
         # Public
         self.conf = conf
         self.logger = logger
@@ -316,14 +326,14 @@ class LCOV:
         self.source_dirs = [os.path.normpath(p) for p in source_dirs]
         self.search_dirs = [os.path.normpath(p) for p in search_dirs]
         self.main_work_dir = main_work_dir
-        self.coverage = coverage
+        self.coverage_details = coverage_details
         self.coverage_info_dir = coverage_info_dir
         self.arcnames = {}
-        self.collect_functions = collect_functions
 
         # Sanity checks
-        if self.coverage not in ('full', 'partial', 'lightweight'):
-            raise NotImplementedError("Coverage type {!r} is not supported".format(self.coverage))
+        if self.coverage_details not in ('All source files', 'C source files including models',
+                                         'Original C source files'):
+            raise NotImplementedError("Code coverage details {!r} are not supported".format(self.coverage_details))
 
         # Import coverage
         try:
@@ -357,7 +367,7 @@ class LCOV:
 
         # Get source files that should be excluded.
         excluded_src_files = set()
-        if self.coverage in ('partial', 'lightweight'):
+        if self.coverage_details in ('C source files including models', 'Original C source files'):
             with open(self.coverage_file, encoding='utf-8') as fp:
                 # Build map, that contains dir as key and list of files in the dir as value
                 all_files = {}
@@ -375,15 +385,13 @@ class LCOV:
                             all_files[path].append(file)
 
                 for path, files in all_files.items():
-                    # Lightweight coverage keeps only source files from source directories.
-                    if self.coverage == 'lightweight' and \
+                    if self.coverage_details == 'Original C source files' and \
                             all(os.path.commonpath([s, path]) != s for s in self.source_dirs):
                         self.logger.debug('Exclude source files from "{0}"'.format(path))
                         for file in files:
                             excluded_src_files.add(os.path.join(path, file))
                         continue
 
-                    # Partial coverage keeps only C source files.
                     for file in files:
                         if not file.endswith('.c'):
                             excluded_src_files.add(os.path.join(path, file))
@@ -418,17 +426,7 @@ class LCOV:
 
                     for dest, srcs in dir_map:
                         for src in (s for s in srcs if os.path.commonpath((s, file_name)) == s):
-                            if dest == 'generated models':
-                                copy_file_name = os.path.join(self.coverage_info_dir,
-                                                              os.path.relpath(file_name, src))
-                                if not os.path.exists(os.path.dirname(copy_file_name)):
-                                    os.makedirs(os.path.dirname(copy_file_name))
-                                shutil.copy(real_file_name, copy_file_name)
-                                file_name = copy_file_name
-                                real_file_name = copy_file_name
-                                new_file_name = os.path.join(dest, os.path.basename(file_name))
-                            else:
-                                new_file_name = os.path.join(dest, os.path.relpath(file_name, src))
+                            new_file_name = os.path.join(dest, os.path.relpath(file_name, src))
                             ignore_file = False
                             break
                         else:
@@ -477,11 +475,11 @@ class LCOV:
                         'arcname': file_name,
                         'total functions': len(function_to_line),
                         'covered lines': covered_lines,
-                        'covered functions': covered_functions
+                        'covered functions': covered_functions,
+                        'covered function names': list((name for name, line in function_to_line.items()
+                                                        if covered_functions[line] != 0))
                     }
-                    if self.collect_functions:
-                        new_cov['covered function names'] = list((name for name, line in function_to_line.items()
-                                                                  if covered_functions[line] != 0))
+
                     coverage_info[file_name].append(new_cov)
 
         if not coverage_info:

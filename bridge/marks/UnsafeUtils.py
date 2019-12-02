@@ -24,6 +24,9 @@ from collections import OrderedDict
 from django.core.files import File
 from django.db import transaction
 from django.db.models import Case, When, Value, Q, F
+from django.utils.translation import ugettext as _
+
+from rest_framework.exceptions import APIException
 
 from bridge.vars import ASSOCIATION_TYPE, UNKNOWN_ERROR, ERROR_TRACE_FILE, COMPARE_FUNCTIONS, CONVERT_FUNCTIONS
 from bridge.utils import logger, BridgeException, ArchiveFileContent, file_checksum
@@ -135,9 +138,9 @@ def save_converted_trace(forests, function):
 def convert_error_trace(error_trace, function):
     # Convert error trace to forests
     if function == 'callback_call_forests':
-        forests = ErrorTraceForests(error_trace, only_callbacks=True).forests
+        forests = CallbackCallForests(error_trace).forests
     elif function == 'thread_call_forests':
-        forests = ErrorTraceForests(error_trace).forests
+        forests = ThreadCallForests(error_trace).forests
     else:
         raise ValueError('Error trace convert function is not supported')
     return save_converted_trace(forests, function)
@@ -151,11 +154,17 @@ class RemoveUnsafeMarks(RemoveMarksBase):
         queryset = self.without_associations_qs
         with transaction.atomic():
             for mr in queryset.select_related('mark'):
-                mr.associated = (mr.result >= mr.mark.threshold)
+                mr.associated = bool(mr.result > 0 and mr.result >= mr.mark.threshold)
                 mr.save()
 
 
 class ConfirmUnsafeMark(ConfirmAssociationBase):
+    model = MarkUnsafeReport
+
+    def can_confirm_validation(self):
+        if not self.association.result:
+            raise APIException(_("You can't confirm mark with zero similarity"))
+
     def recalculate_cache(self, report_id):
         RecalculateUnsafeCache(reports=[report_id])
 
@@ -165,7 +174,7 @@ class UnconfirmUnsafeMark(UnconfirmAssociationBase):
 
     def get_automatically_associated_qs(self):
         queryset = super(UnconfirmUnsafeMark, self).get_automatically_associated_qs()
-        return queryset.filter(error=None, result__gte=F('mark__threshold'))
+        return queryset.filter(error=None, result__gte=F('mark__threshold'), result__gt=0)
 
     def recalculate_cache(self, report_id):
         RecalculateUnsafeCache(reports=[report_id])
@@ -231,54 +240,97 @@ class ConnectUnsafeReport:
         RecalculateUnsafeCache(reports=[self._report.id])
 
 
-class ErrorTraceForests:
-    def __init__(self, error_trace, only_callbacks=False):
+class ThreadCallForests:
+    def __init__(self, error_trace):
         self._trace = error_trace
-        self._only_callbacks = only_callbacks
         self._forests_dict = OrderedDict()
         self.forests = self.__collect_forests()
 
     def __collect_forests(self):
         self.__parse_child(self._trace['trace'])
-        all_forests = []
-        for thread_forests in self._forests_dict.values():
-            all_forests.extend(thread_forests)
-        return all_forests
+        return list(forest for forest in self._forests_dict.values() if forest)
 
     def __parse_child(self, node, thread=None):
         if node['type'] == 'statement':
             return []
 
         if node['type'] == 'thread':
-            self._forests_dict[node['thread']] = []
-            children_forests = []
+            self._forests_dict.setdefault(node['thread'], [])
             for child in node['children']:
-                children_forests.extend(self.__parse_child(child, node['thread']))
-            if not self._only_callbacks:
-                # Children forests here have function roots, not callbacks
-                self._forests_dict[node['thread']].extend(children_forests)
+                self.__parse_child(child, node['thread'])
             return []
 
         if node['type'] == 'function call':
             has_body_note = False
-            children_forests = []
+            children_call_trees = []
             for child in node['children']:
                 has_body_note |= self.__has_note(child)
-                children_forests.extend(self.__parse_child(child, thread))
+                children_call_trees.extend(self.__parse_child(child, thread))
 
-            if children_forests or has_body_note or bool(node.get('note')):
-                return [{node.get('display', node['source']): children_forests}]
+            if children_call_trees or has_body_note or bool(node.get('note')):
+                return [{node.get('display', node['source']): children_call_trees}]
             # No children and no notes in body and no notes in call
             return []
 
         if node['type'] == 'action':
-            new_forests = []
+            children_call_trees = []
             for child in node['children']:
-                new_forests.extend(self.__parse_child(child, thread))
+                children_call_trees.extend(self.__parse_child(child, thread))
             if node.get('callback'):
-                self._forests_dict[thread].append({node['display']: new_forests})
+                # Add to the thread forest its call tree with callback action at the root
+                if children_call_trees:
+                    self._forests_dict[thread].append(children_call_trees)
                 return []
-            return new_forests
+            return children_call_trees
+
+    def __has_note(self, node):
+        if node['type'] == 'action':
+            # Skip callback actions
+            if node.get('callback'):
+                return False
+            for child in node['children']:
+                if self.__has_note(child):
+                    return True
+            return False
+        return bool(node.get('note'))
+
+
+class CallbackCallForests:
+    def __init__(self, error_trace):
+        self._trace = error_trace
+        self.forests = []
+        self.__parse_child(self._trace['trace'])
+
+    def __parse_child(self, node):
+        if node['type'] == 'statement':
+            return []
+
+        if node['type'] == 'thread':
+            for child in node['children']:
+                self.__parse_child(child)
+            return []
+
+        if node['type'] == 'function call':
+            has_body_note = False
+            children_call_trees = []
+            for child in node['children']:
+                has_body_note |= self.__has_note(child)
+                children_call_trees.extend(self.__parse_child(child))
+
+            if children_call_trees or has_body_note or bool(node.get('note')):
+                return [{node.get('display', node['source']): children_call_trees}]
+            # No children and no notes in body and no notes in call
+            return []
+
+        if node['type'] == 'action':
+            children_call_trees = []
+            for child in node['children']:
+                children_call_trees.extend(self.__parse_child(child))
+            if node.get('callback'):
+                if children_call_trees:
+                    self.forests.append(children_call_trees)
+                return []
+            return children_call_trees
 
     def __has_note(self, node):
         if node['type'] == 'action':
@@ -335,7 +387,7 @@ class CompareMark:
                 res = jaccard(self._mark_cache, reports_cache[report_id])
                 results[report_id] = {
                     'result': res, 'error': None,
-                    'associated': bool(res >= self._mark.threshold)
+                    'associated': bool(res > 0 and res >= self._mark.threshold)
                 }
         return results
 
@@ -390,7 +442,7 @@ class CompareReport:
                 res = jaccard(marks_cache[mark_id]['cache'], rep_cache_set)
                 results[mark_id] = {
                     'result': res, 'error': None,
-                    'associated': bool(res >= marks_cache[mark_id]['threshold'])
+                    'associated': bool(res > 0 and res >= marks_cache[mark_id]['threshold'])
                 }
         return results
 
@@ -410,7 +462,7 @@ class UpdateAssociated:
                 result__lt=self._mark.threshold, type=ASSOCIATION_TYPE[1][0]
             ).update(type=ASSOCIATION_TYPE[0][0])
 
-        associate_condition = Q(result__gte=self._mark.threshold)
+        associate_condition = Q(result__gte=self._mark.threshold, result__gt=0)
         if has_confirmed:
             associate_condition &= Q(type=ASSOCIATION_TYPE[1][0])
 

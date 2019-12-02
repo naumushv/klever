@@ -28,17 +28,34 @@ def parser_test(method):
             # Test that it is the same
             new_obj = import_declaration(obj.to_string('name'))
             # todo: Pretty names are different but I am not sure whether it correct or not
-            assert obj.compare(new_obj)
+            assert obj == new_obj
 
     return new_method
+
+
+def test_equality():
+    tests = [
+        'int x',
+        'int *x',
+        'void x(void)',
+        'void *x(void)',
+        'void *x(void *)'
+    ]
+
+    for test in tests:
+        obj = import_declaration(test)
+        # Test that it is parsed
+        assert obj
+        assert obj.to_string('x') == test
 
 
 @parser_test
 def test_var():
     return [
+        'static int a;',
+        'extern int a;',
         'int a',
-        'int a;',
-        'static int a;'
+        'int a;'
     ]
 
 

@@ -52,6 +52,14 @@ def merge_files(logger, conf, abstract_task_desc):
             # This helps to reduce considerable memory consumption by CIL itself since input files are processed more
             # sequentially.
             '-no-annot',
+            # This allows to avoid temporary variables to hold return values for all functions and returns at the end of
+            # functions even when returning in the middle.
+            '-no-single-return',
+            # Remove redundant zero initializers of global variables that are specified in original sources (rarely) or
+            # added by CIL itself.
+            '-shrink-initializers',
+            # TODO: Try to turn this option off since it can disable some optimizations (but without it RP fails).
+            '-print-cil-as-is',
             # Rest options.
             '-keep-logical-operators',
             '-aggressive-merging',
@@ -65,6 +73,9 @@ def merge_files(logger, conf, abstract_task_desc):
            ]
 
     core.utils.execute(logger, args=args, enforce_limitations=True)
+    # There will be empty file if CIL succeeded. Remove it to avoid unknown reports of whole FVTP later.
+    if os.path.isfile('problem desc.txt'):
+        os.unlink('problem desc.txt')
 
     logger.debug('Merged source files was outputted to "cil.i"')
 
@@ -131,18 +142,18 @@ def get_verifier_opts_and_safe_prps(logger, resource_limits, conf):
 
         return desc1
 
-    logger.debug("Import verifier profiles DB")
+    logger.debug("Import verifier profiles base")
     try:
-        verifier_profile_db = conf["verifier profiles DB"]
+        verifier_profile_db = conf["verifier profiles base"]
     except KeyError:
-        raise KeyError('Set "verifier profiles DB" configuration option and provide corresponding file with '
+        raise KeyError('Set "verifier profiles base" configuration option and provide corresponding file with '
                        'verifiers profiles containing options')
     try:
         verifier_profile_db = core.utils.find_file_or_dir(logger, conf["main working directory"], verifier_profile_db)
         with open(verifier_profile_db, 'r', encoding='utf8') as fp:
             profiles = json.loads(fp.read())
     except FileNotFoundError:
-        raise FileNotFoundError("There is no verifier profiles DB file: {!r}".format(verifier_profile_db))
+        raise FileNotFoundError("There is no verifier profiles base file: {!r}".format(verifier_profile_db))
 
     logger.debug("Determine profile for the given verifier and its version")
     try:

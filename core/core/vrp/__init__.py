@@ -97,8 +97,8 @@ class VRP(core.components.Component):
     def __result_processing(self):
         pending = dict()
         # todo: implement them in GUI
-        solution_timeout = 10
-        generation_timeout = 5
+        solution_timeout = 1
+        generation_timeout = 1
 
         source_paths = self.conf['working source trees']
         self.logger.info('Source paths to be trimmed file names: {0}'.format(source_paths))
@@ -182,25 +182,16 @@ class VRP(core.components.Component):
             status, data, attempt, source_paths = element
             pf = data[2]['id']
             requirement = data[3]
-            attrs = [
-                {
-                    "name": "Requirement",
-                    "value": requirement,
-                    "compare": True,
-                    "associate": True
-                }
-            ]
+            attrs = None
             if attempt:
                 new_id = "{}/{}/{}/RP".format(pf, requirement, attempt)
                 workdir = os.path.join(pf, requirement, str(attempt))
-                attrs.append(
-                    {
-                        "name": "Rescheduling attempt",
-                        "value": str(attempt),
-                        "compare": False,
-                        "associate": False
-                    }
-                )
+                attrs = [{
+                    "name": "Rescheduling attempt",
+                    "value": str(attempt),
+                    "compare": False,
+                    "associate": False
+                }]
             else:
                 new_id = "{}/{}/RP".format(pf, requirement)
                 workdir = os.path.join(pf, requirement)
@@ -238,8 +229,8 @@ class RP(core.components.Component):
         # Read this in a callback
         self.element = element
         self.verdict = None
-        self.requirement = None
-        self.program_fragment = None
+        self.req_spec_id = None
+        self.program_fragment_id = None
         self.task_error = None
         self.source_paths = source_paths
         self.__exception = None
@@ -259,16 +250,16 @@ class RP(core.components.Component):
         self.logger.info("VRP instance is ready to work")
         element = self.element
         status, data = element
-        task_id, opts, program_fragment, requirement, verifier, additional_srcs = data
-        self.program_fragment = program_fragment['id']
-        self.requirement = requirement
-        self.results_key = '{}:{}'.format(self.program_fragment, self.requirement)
+        task_id, opts, program_fragment_desc, req_spec_id, verifier, additional_srcs = data
+        self.program_fragment_id = program_fragment_desc['id']
+        self.req_spec_id = req_spec_id
+        self.results_key = '{}:{}'.format(self.program_fragment_id, self.req_spec_id)
         self.additional_srcs = additional_srcs
         self.logger.debug("Process results of task {}".format(task_id))
 
         files_list_file = 'files list.txt'
         with open(files_list_file, 'w', encoding='utf8') as fp:
-            fp.writelines('\n'.join(sorted(f for grp in program_fragment['grps'] for f in grp['files'])))
+            fp.writelines('\n'.join(sorted(f for grp in program_fragment_desc['grps'] for f in grp['files'])))
         core.utils.report(self.logger,
                           'patch',
                           {
@@ -276,10 +267,22 @@ class RP(core.components.Component):
                               'attrs': [
                                   {
                                       "name": "Program fragment",
-                                      "value": program_fragment['id'],
+                                      "value": self.program_fragment_id,
                                       "data": files_list_file,
                                       "compare": True,
                                       "associate": True
+                                  },
+                                  {
+                                      "name": "Requirements specification",
+                                      "value": req_spec_id,
+                                      "compare": True,
+                                      "associate": True
+                                  },
+                                  {
+                                      "name": "Size",
+                                      "value": program_fragment_desc['size'],
+                                      "compare": False,
+                                      "associate": False
                                   }
                               ]
                           },
@@ -313,8 +316,8 @@ class RP(core.components.Component):
 
     def process_witness(self, witness):
         error_trace, attrs = import_error_trace(self.logger, witness)
-        sources = self.__trim_file_names(error_trace['files'])
-        error_trace['files'] = [sources[file] for file in error_trace['files']]
+        trimmed_file_names = self.__trim_file_names(error_trace['files'])
+        error_trace['files'] = [trimmed_file_names[file] for file in error_trace['files']]
 
         # Distinguish multiple witnesses and error traces by using artificial unique identifiers encoded within witness
         # file names.
@@ -506,7 +509,7 @@ class RP(core.components.Component):
         # Get coverage
         coverage_info_dir = os.path.join('total coverages',
                                          self.conf['sub-job identifier'],
-                                         self.requirement.replace('/', '-'))
+                                         self.req_spec_id.replace('/', '-'))
         os.makedirs(os.path.join(self.conf['main working directory'], coverage_info_dir), exist_ok=True)
 
         self.coverage_info_file = os.path.join(coverage_info_dir,
@@ -520,22 +523,19 @@ class RP(core.components.Component):
         if not self.logger.disabled and log_file:
             report['log'] = core.utils.ArchiveFiles([log_file], {log_file: 'log.txt'})
 
-        if self.conf['upload input files of static verifiers']:
+        if self.conf['upload verifier input files']:
             report['task'] = task_id
 
-        # Coverage may be non-specified or be one of the supported types (see at core.coverage.LCOV).
-        coverage = opts.get('coverage')
         # Remember exception and raise it if verdict is not unknown
         exception = None
-        if coverage:
+        if opts['code coverage details'] != "None":
             try:
                 LCOV(self.conf, self.logger, os.path.join('output', 'coverage.info'),
                      self.clade, self.source_paths,
                      self.search_dirs, self.conf['main working directory'],
-                     coverage,
+                     opts['code coverage details'],
                      os.path.join(self.conf['main working directory'], self.coverage_info_file),
-                     os.path.join(self.conf['main working directory'], coverage_info_dir),
-                     opts.get('collect function names'))
+                     os.path.join(self.conf['main working directory'], coverage_info_dir))
             except Exception as err:
                 exception = err
             else:
@@ -569,11 +569,11 @@ class RP(core.components.Component):
             self.logger.exception('Could not parse coverage')
 
     def __trim_file_names(self, file_names):
-        arcnames = {}
+        trimmed_file_names = {}
 
         for file_name in file_names:
             # Caller expects a returned dictionary maps each file name, so, let's fill it anyway.
-            arcnames[file_name] = file_name
+            trimmed_file_names[file_name] = file_name
 
             # Remove storage from file names if files were put there.
             storage_file = core.utils.make_relative_path([self.clade.storage_dir], file_name)
@@ -581,18 +581,14 @@ class RP(core.components.Component):
             tmp = core.utils.make_relative_path(self.source_paths, storage_file, absolutize=True)
             # Append special directory name "source files" when cutting off source file names.
             if tmp != os.path.join(os.path.sep, storage_file):
-                arcnames[file_name] = os.path.join('source files', tmp)
+                trimmed_file_names[file_name] = os.path.join('source files', tmp)
             else:
                 # Like in core.vtg.weaver.Weaver#weave.
                 tmp = core.utils.make_relative_path(self.search_dirs, storage_file, absolutize=True)
                 if tmp != os.path.join(os.path.sep, storage_file):
                     if tmp.startswith('specifications'):
-                        arcnames[file_name] = tmp
+                        trimmed_file_names[file_name] = tmp
                     else:
-                        tmp = os.path.join('generated models', os.path.basename(tmp))
-                        if any(arcname == tmp for arcname in arcnames.values()):
-                            self.logger.warn("There is shrinked file name collision")
-                            continue
-                        arcnames[file_name] = tmp
+                        trimmed_file_names[file_name] = os.path.join('generated models', tmp)
 
-        return arcnames
+        return trimmed_file_names

@@ -15,6 +15,7 @@
 # limitations under the License.
 #
 
+import glob
 import fileinput
 import json
 import os
@@ -123,7 +124,7 @@ class Weaver(core.vtg.plugins.Plugin):
                                   '--aspect', os.path.realpath(aspect),
                                   # Besides header files specific for requirements specifications will be searched for.
                                   '--general-opts',
-                                  '-I' + os.path.realpath(os.path.dirname(self.conf['requirements DB'])),
+                                  '-I' + os.path.realpath(os.path.dirname(self.conf['specifications base'])),
                                   '--aspect-preprocessing-opts', ' '.join(self.conf['aspect preprocessing options'])
                                                                  if 'aspect preprocessing options' in self.conf else '',
                                   '--out', os.path.realpath(outfile),
@@ -210,7 +211,7 @@ class Weaver(core.vtg.plugins.Plugin):
                                     '-ia',
                                     '--cmds', os.path.realpath('cmds.txt'),
                                     'aspectator',
-                                    '-I' + os.path.realpath(os.path.dirname(self.conf['requirements DB']))
+                                    '-I' + os.path.realpath(os.path.dirname(self.conf['specifications base']))
                                 ] +
                                 core.vtg.utils.prepare_cif_opts(cc['opts'], clade, grp['id'] == 'models') +
                                 [
@@ -227,9 +228,6 @@ class Weaver(core.vtg.plugins.Plugin):
                         )
                 else:
                     extra_c_file = {}
-
-                if 'requirement id' in extra_cc:
-                    extra_c_file['requirement id'] = extra_cc['requirement id']
 
                 self.abstract_task_desc['extra C files'].append(extra_c_file)
 
@@ -255,18 +253,17 @@ class Weaver(core.vtg.plugins.Plugin):
 
                 new_file = core.utils.make_relative_path(search_dirs, storage_file, absolutize=True)
 
+                # These source files do not belong neither to original sources nor to models, e.g. there are compiler
+                # headers.
+                if os.path.isabs(new_file):
+                    continue
+
                 # We treat all remaining source files which paths do not start with "specifications" as generated
                 # models. This is not correct for all cases, e.g. when users put some files within $KLEVER_DATA_DIR.
                 if not new_file.startswith('specifications'):
-                    new_file = os.path.join('generated models', os.path.basename(new_file))
+                    new_file = os.path.join('generated models', new_file)
 
                 new_file = os.path.join('additional sources', new_file)
-
-                if os.path.isfile(new_file):
-                    self.logger.warn('Additional source file "{0}" was already copied ({1})'
-                                     .format(new_file, 'most likely there is shrinked file name collision'))
-                    continue
-
                 os.makedirs(os.path.dirname(new_file), exist_ok=True)
                 shutil.copy(file, new_file)
 
@@ -274,8 +271,36 @@ class Weaver(core.vtg.plugins.Plugin):
                                        new_file, search_dirs)
                 cross_refs.get_cross_refs()
 
+        # For auxiliary files there is no cross references since it is rather hard to get them from Aspectator. But
+        # there still highlighting.
+        for aux_file in glob.glob('*.aux'):
+            new_file = os.path.join('additional sources', 'generated models',
+                                    os.path.relpath(aux_file, self.conf['main working directory']))
+
+            os.makedirs(os.path.dirname(new_file), exist_ok=True)
+            shutil.copy(aux_file, new_file)
+
+            cross_refs = CrossRefs(self.conf, self.logger, clade_extra, aux_file, new_file, search_dirs)
+            cross_refs.get_cross_refs()
+
         self.abstract_task_desc['additional sources'] = os.path.relpath('additional sources',
                                                                         self.conf['main working directory'])
+
+        # Copy additional sources for total code coverage.
+        if self.conf['code coverage details'] == 'All source files':
+            with core.utils.Cd('additional sources'):
+                for root, dirs, files in os.walk(os.path.curdir):
+                    for file in files:
+                        file = os.path.join(root, file)
+                        new_file = os.path.join(self.conf['additional sources directory'], file)
+
+                        if os.path.isfile(new_file):
+                            # TODO: this should never happen, otherwise there should be more explicit warning (note).
+                            self.logger.warning('Additional source file "{0}" already exists'.format(file))
+                            continue
+
+                        os.makedirs(os.path.dirname(new_file), exist_ok=True)
+                        shutil.copy(file, new_file)
 
         if not self.conf['keep intermediate files']:
             shutil.rmtree('clade')

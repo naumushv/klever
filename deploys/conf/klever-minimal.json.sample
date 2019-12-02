@@ -36,6 +36,7 @@
     "For building and running Klever Bridge": [
       "Django==2.1.7",
       "djangorestframework",
+      "django-compressor",
       "django-mptt",
       "gunicorn",
       "pika",
@@ -67,8 +68,8 @@
       "path": "https://forge.ispras.ru/attachments/download/6780/cif-d09b7a5.tar.xz"
     },
     "CIL": {
-      "version": "460aed4",
-      "path": "https://forge.ispras.ru/attachments/download/6848/toplevel.opt.tar.xz",
+      "version": "8ded734",
+      "path": "https://forge.ispras.ru/attachments/download/7049/frama-c-cil-8ded734.tar.xz",
       "executable path": "."
     },
     "Consul": {
@@ -86,6 +87,6 @@
     }
   },
   "Klever Build Bases": [
-    "https://forge.ispras.ru/attachments/download/6846/build-base-linux-3.14.79-x86_64-test.tar.xz"
+    "https://forge.ispras.ru/attachments/download/7041/build-base-linux-3.14.79-x86_64-sample.tar.xz"
   ]
 }

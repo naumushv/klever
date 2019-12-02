@@ -33,21 +33,20 @@ class FragmentationAlgorythm:
     """
     CLADE_PRESET = 'base'
 
-    def __init__(self, logger, conf, desc, pf_dir):
+    def __init__(self, logger, conf, tactic, pf_dir):
         """
         The strategy needs a logger and configuration as the rest Klever components but also it requires Clade interface
         object (uninitialized yet) and the description of the fragmentation set.
 
         :param logger: logging Logger object.
         :param conf: Dictionary.
-        :param desc: Dictionary.
-        :param clade: Clade interface.
+        :param tactic: Dictionary with options.
         :param pf_dir: program fragments descriptions storage dir.
         """
         # Simple attributes
         self.logger = logger
         self.conf = conf
-        self.fragmentation_set_conf = desc
+        self.tactic = tactic
         self.pf_dir = pf_dir
         self.files_to_keep = list()
         self.common_attributes = list()
@@ -60,7 +59,7 @@ class FragmentationAlgorythm:
         # Complex attributes
         self.attributes = self.__attributes()
 
-    def fragmentation(self):
+    def fragmentation(self, fragmentation_set, tactic_name, fset_name):
         """
         It is the main function for a fragmentation strategy. The workflow is the following: it determines logical
         components of the program called units, then chooses files and units that should be verified according to the
@@ -68,11 +67,14 @@ class FragmentationAlgorythm:
         to this manually provided description, then add dependencies if necessary to each fragment that should be
         verified and generate the description of each program fragment. The description contains in addition to the
         files names compilation commands to get their options and dependencies between files.
-        """
 
+        :parameter fragmentation_set: Fragmentation set description dict.
+        :parameter tactic_name: Fragmentation tactic name.
+        :parameter fset_name: Fragmentation set name.
+        """
         # Extract dependencies
         self.logger.info("Start program fragmentation")
-        if self.fragmentation_set_conf.get('ignore dependencies'):
+        if self.tactic.get('ignore dependencies'):
             self.logger.info("Use memory efficient mode with limitied dependencies extraction")
             memory_efficient_mode = True
         else:
@@ -86,7 +88,7 @@ class FragmentationAlgorythm:
 
         # Prepare semifinal fragments according to strategy chosen manually
         self.logger.info("Apply corrections of program fragments provided by a user")
-        defined_groups = self._do_manual_correction(deps)
+        defined_groups = self._do_manual_correction(deps, fragmentation_set)
 
         # Mark dirs, units, files, functions
         self.logger.info("Select program fragments for verification")
@@ -124,10 +126,10 @@ class FragmentationAlgorythm:
 
         # Prepare data attributes
         self.logger.info("Prepare data attributes for generated fragments")
-        attr_data = self.__prepare_data_files(grps)
+        attr_data = self.__prepare_data_files(grps, tactic_name, fset_name)
 
         # Print fragments
-        if self.fragmentation_set_conf.get('print fragments'):
+        if self.tactic.get('print fragments'):
             self.__print_fragments(deps)
             for fragment in deps.fragments:
                 self.__draw_fragment(fragment)
@@ -150,9 +152,9 @@ class FragmentationAlgorythm:
         :param program:
         :return:
         """
-        add = set(self.conf.get('add targets'))
+        add = set(self.conf.get('targets'))
         if not add:
-            raise RuntimeError("Set configuration property 'add targets' to specify which functions, files or fragments"
+            raise RuntimeError("Set configuration property 'targets' to specify which functions, files or fragments"
                                " you want to verify")
         exclude = set(self.conf.get('exclude targets', set()))
 
@@ -182,17 +184,18 @@ class FragmentationAlgorythm:
             self.logger.debug('Mark file {!r} as a target'.format(file.name))
             file.target = True
 
-    def _do_manual_correction(self, program):
+    def _do_manual_correction(self, program, fragments_desc):
         """
         According to the fragmentation set configuration we need to change the content of logically extracted units or
         create new ones.
 
         :param program: Program object.
+        :param fragments_desc: Fragmentation set dictionary.
         """
         self.logger.info("Adjust fragments according to the manually provided fragmentation set")
-        fragments = self.fragmentation_set_conf.get('fragments', dict())
-        remove = set(self.fragmentation_set_conf.get('exclude from all fragments', set()))
-        add = set(self.fragmentation_set_conf.get('add to all fragments', set()))
+        fragments = fragments_desc.get('fragments', dict())
+        remove = set(fragments_desc.get('exclude from all fragments', set()))
+        add = set(fragments_desc.get('add to all fragments', set()))
         defined_groups = dict()
 
         # Collect files
@@ -281,31 +284,37 @@ class FragmentationAlgorythm:
         :param program: Program object.
         :return: Dictionary with sets of fragments.
         """
-        aggregator = Abstract(self.logger, self.conf, self.fragmentation_set_conf, program)
+        aggregator = Abstract(self.logger, self.conf, self.tactic, program)
         return aggregator.get_groups()
 
-    def __prepare_data_files(self, grps):
+    def __prepare_data_files(self, grps, tactic, fragmentation_set):
         """
         Prepare data files that describe program fragments content.
 
         :param grps: Dictionary with program fragments with dependencies.
+        :param tactic: Name of the tactic.
+        :param grps: Name of the fragmentation set.
         :return: Attributes and dict a list of data files.
         """
         data = dict()
         for name, main_and_frgs in grps.items():
             main, frags = main_and_frgs
-            data[name] = {f.name: sorted(make_relative_path(self.source_paths, l.name) for l in f.files) for f in frags}
+            data[name] = {
+                "fragments": {
+                    f.name: {
+                        'content': {make_relative_path(self.source_paths, l.name): l.size for l in f.files},
+                        'size': str(f.size)
+                } for f in frags},
+                "size": str(sum(int(f.size) for f in frags))
+            }
 
         with open('agregations description.json', 'w', encoding='utf8') as fp:
             ujson.dump(data, fp, sort_keys=True, indent=4, ensure_ascii=False,
                        escape_forward_slashes=False)
 
-        main_desc = [
-            {'name': 'program', 'value': self.conf['program'], 'data': 'agregations description.json'},
-            {'name': 'template', 'value': self.conf['fragmentation set']}
-        ]
-        if self.conf.get('version'):
-            main_desc.append({'name': 'version', 'value': self.conf['version']})
+        main_desc = [{'name': 'program', 'value': self.conf['project'], 'data': 'agregations description.json'}]
+        main_desc.append({'name': 'fragmentation tactic', 'value': tactic})
+        main_desc.append({'name': 'fragmentation set', 'value': fragmentation_set})
         return [{'name': 'Fragmentation set', 'value': main_desc}], ['agregations description.json']
 
     def __attributes(self):
@@ -356,7 +365,8 @@ class FragmentationAlgorythm:
             'fragment': name,
             'targets': sorted([str(f) for f in main_fragment.target_files]),
             'grps': list(),
-            'deps': dict()
+            'deps': dict(),
+            'size': str(sum((int(f.size) for f in fragments)))
         }
 
         for frag in fragments:
