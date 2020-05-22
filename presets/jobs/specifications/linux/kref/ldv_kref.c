@@ -40,13 +40,9 @@ void ldv_put_device(struct device *dev)
 
 void ldv_kobject_put(struct kobject *kobj)
 {
-	if (kobj) {
-		if (!kobj->state_initialized)
-			WARN(1, KERN_WARNING
-				"kobject: '%s' (%p): is not initialized, yet kobject_put() is being called.\n",
-			     kobject_name(kobj), kobj);
-		ldv_kref_put(&kobj->kref, kobject_release);
-	}
+    if (kobj) {
+        ldv_kref_put(&kobj->kref, &kobj->ktype->release);
+    }
 }
 
 // kobj_to_dev не содержит EXPORT_SYMBOL
