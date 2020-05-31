@@ -21,7 +21,7 @@ static inline void ldv_kref_init(struct kref *kref)
 
 static inline unsigned int ldv_kref_read(const struct kref *kref)
 {
-	return atomic_read(&r->refs->refs);
+	return kref->refcount->refs->counter;
 }
 
 static inline void ldv_refcount_set(refcount_t *r, int n)
