@@ -6,6 +6,8 @@ before: file ("$this")
 #include <linux/kobject.h>
 #include <linux/spinlock.h>
 #include <linux/refcount.h>
+#include <linux/kernel.h>
+
 }
 
 around: define(REFCOUNT_INIT(n))
@@ -13,110 +15,82 @@ around: define(REFCOUNT_INIT(n))
   ldv_kref_init(n)
 }
 
-// для этих функций нет EXPORT_SYMBOL
-/*
-around: arch_atomic_fetch_add_relaxed(..)
-{
-  ldv_arch_atomic_fetch_add_relaxed(..)
-}
-
-around: __atomic_release_fence(..)
-{
-  ldv_smp_mb__before_atomic(..)
-}
-
-// здесь я остановлюсь реф -- ldv_atomic_fetch_sub_release
-around: ldv_smp_mb__before_atomic(..)
-{
-  ldv_barrier(..)
-}
-*/
-
 static inline void ldv_refcount_set(refcount_t *r, int n);
 static inline void ldv_kref_init(struct kref *kref);
 static inline unsigned int ldv_kref_read(const struct kref *kref);
-static inline unsigned int ldv_refcount_read(const refcount_t *r);
 void ldv_put_device(struct device *dev);
 void ldv_kobject_put(struct kobject *kobj);
 struct device *ldv_get_device(struct device *dev);
 struct kobject *ldv_kobject_get(struct kobject *kobj);
 static inline int ldv_kref_put(struct kref *kref, void (*release)(struct kref *kref));
+static inline int ldv_kref_put(struct kref *kref);
 static inline void ldv_kref_get(struct kref *kref);
-static inline void ldv_refcount_inc(refcount_t *r);
-static inline void ldv_refcount_add(int i, refcount_t *r);
 
 
-around: call(void refcount_set(..))
+around: call(static inline void v4l2_device_get(..))
 {
-	return ldv_refcount_set($arg3);
+	return ldv_kref_get($arg1);
 }
 
-around: call(void kref_init(..))
+around: call(int v4l2_device_put(..))
 {
-	return ldv_kref_init($arg3);
+	return ldv_kref_put(& $arg1->ref, $arg1->release);
 }
 
-around: call(unsigned int kref_read(..))
+
+around: call(static inline void refcount_set(..))
 {
-	return ldv_kref_read($arg3);
+	return ldv_refcount_set($arg1,$arg2);
 }
 
-around: call(unsigned int refcount_read(..))
+
+around: call(static inline void kref_init(..))
 {
-	return ldv_refcount_read($arg3);
+	return ldv_kref_init($arg1);
+}
+
+around: call(static inline unsigned int kref_read(..))
+{
+	return ldv_kref_read($arg1);
 }
 
 around: call(void put_device(..))
 {
-	return ldv_put_device($arg3);
+	return ldv_put_device($arg1);
 }
 
 around: call(void kobject_put(..))
 {
-	return ldv_kobject_put($arg3);
+	return ldv_kobject_put($arg1);
 }
 
-around: call(void get_device(..))
+around: call(struct device get_device(..))
 {
-	return ldv_get_device($arg3);
+	return ldv_get_device($arg1);
 }
 
-around: call(void kobject_get(..))
+around: call(struct kobject kobject_get(..))
 {
-	return ldv_kobject_get($arg3);
+	return ldv_kobject_get($arg1);
 }
 
-around: call(int kref_put(..))
+around: call(static inline int kref_put(..))
 {
-	return ldv_kref_put($arg3);
+	return ldv_kref_put($arg1,$arg2);
 }
 
 
-around: call(void kref_get(..))
+around: call(static inline void kref_get(..))
 {
-	return ldv_kref_get($arg3);
+	return ldv_kref_get($arg1);
 }
 
-around: call(void ldv_refcount_inc(..))
+around: call(static inline void refcount_inc(..))
 {
-	return ldv_refcount_inc($arg3);
-}
-
-around: call(void ldv_refcount_add(..))
-{
-	return ldv_refcount_add($arg3);
+	return ldv_kref_get($arg1);
 }
 
 
 
-
-
-
-// WARN -- macros, which one?
-    include/asm-generic/bug.h, line 121 (as a macro)
-    include/asm-generic/bug.h, line 188 (as a macro)
-    tools/include/asm/bug.h, line 10 (as a macro)
-    tools/objtool/warn.h, line 43 (as a macro)
-    tools/testing/selftests/rcutorture/formal/srcu-cbmc/src/bug_on.h, line 11 (as a macro) 
 
 
