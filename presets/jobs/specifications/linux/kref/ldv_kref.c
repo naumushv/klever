@@ -1,75 +1,80 @@
-#ifndef _KREF_H_
-#define _KREF_H_
-
 #include <linux/kobject.h>
 #include <linux/types.h>
 #include <linux/kref.h>
 #include <linux/refcount.h>
 #include <ldv/common.h>
+#include <ldv/verifier/common.h>
 #include <linux/kernel.h>
+#include <media/v4l2-device.h>
+#include <linux/usb.h>
+#include <linux/device.h>
 
-struct kref;
-
-
-static inline void ldv_kref_init(struct kref *kref)
+void ldv_kref_init(struct kref *kref)
 {
-	&kref->refcount->refs->counter = 1;
+	kref->refcount.refs.counter = 1;
 }
 
-static inline unsigned int ldv_kref_read(const struct kref *kref)
+unsigned int ldv_kref_read(const struct kref *kref)
 {
-	return kref->refcount->refs->counter;
+	return kref->refcount.refs.counter;
 }
 
-static inline void ldv_refcount_set(refcount_t *r, int n)
+void ldv_refcount_set(refcount_t *r, int n)
 {
-	&r->refs->counter = n;
+	r->refs.counter = n;
 }
 
-static inline void ldv_kref_get(struct kref *kref)
+void ldv_refcount_inc(refcount_t *r)
 {
-  kref->refcount->refs->counter++;
+    r->refs.counter++;
 }
 
-static inline void ldv_kref_put(struct kref *kref, void (*release)(struct kref *kref))
+void ldv_kref_get(struct kref *kref)
 {
-	ldv_assert(kref->refcount->refs->counter);
-	ldv_assert(kref->refcount->refs->counter <= 0);
-  	kref->refcount->refs->counter--;
-	if (kref->refcount->refs->counter == 0) release(kref);
-	return 1;
+  	ldv_assert(kref->refcount.refs.counter > 0);
+    ldv_refcount_inc(&kref->refcount);
 }
 
-void ldv_put_device(struct device *dev)
+int ldv_kref_put(struct kref *kref, void (*release)(struct kref *kref))
 {
-	if (dev && &dev->kobj)
-	ldv_kobject_put(&dev->kobj);
+	ldv_assert(kref->refcount.refs.counter > 0);
+  	kref->refcount.refs.counter--;
+	if (kref->refcount.refs.counter == 0) {
+        release(kref);
+        return 1;
+	}
+	return 0;
+}
+
+void ldv_kobject_release(struct kref *kref) {
+    struct kobject *kobj = container_of(kref, struct kobject, kref);
+    kobj->ktype->release(kobj);
 }
 
 void ldv_kobject_put(struct kobject *kobj)
 {
   	if (kobj) {
-		ldv_kref_put(&kobj->kref, &kobj->ktype->release);
+		ldv_kref_put(&kobj->kref, ldv_kobject_release);
   	}
-}
-
-struct device *ldv_get_device(struct device *dev)
-{
-	return (dev && &dev->kobj) ? kobj_to_dev(ldv_kobject_get(&dev->kobj)) : NULL;
-}
-
-static inline struct device *kobj_to_dev(struct kobject *kobj)
-{
-	return container_of(kobj, struct device, kobj);
 }
 
 struct kobject *ldv_kobject_get(struct kobject *kobj)
 {
-	ldv_assert(kref->refcount->refs->counter > 0);
 	if (kobj) {
 		ldv_kref_get(&kobj->kref);
 	}
 	return kobj;
+}
+
+void ldv_kobject_init_internal(struct kobject *kobj)
+{
+	if (!kobj)
+		return;
+	ldv_kref_init(&kobj->kref);
+	kobj->state_in_sysfs = 0;
+	kobj->state_add_uevent_sent = 0;
+	kobj->state_remove_uevent_sent = 0;
+	kobj->state_initialized = 1;
 }
 
 void ldv_kobject_init(struct kobject *kobj, struct kobj_type *ktype)
@@ -79,15 +84,21 @@ void ldv_kobject_init(struct kobject *kobj, struct kobj_type *ktype)
 	return;
 }
 
-static void ldv_kobject_init_internal(struct kobject *kobj)
+void ldv_put_device(struct device *dev)
 {
-	if (!kobj)
-		return;
-	ldv_kref_init(&kobj->kref);
-	kobj->state_in_sysfs = 0;
-	kobj->state_add_uevent_sent = 0;
-	kobj->state_remove_uevent_sent = 0;
-	kobj->state_initialized = 1;
+	if (dev) {
+	    ldv_kobject_put(&dev->kobj);
+    }
+}
+
+struct device *ldv_kobj_to_dev(struct kobject *kobj)
+{
+	return container_of(kobj, struct device, kobj);
+}
+
+struct device *ldv_get_device(struct device *dev)
+{
+	return dev ? ldv_kobj_to_dev(ldv_kobject_get(&dev->kobj)) : NULL;
 }
 
 struct usb_device *ldv_usb_get_dev(struct usb_device *dev)
@@ -103,6 +114,11 @@ void ldv_usb_put_dev(struct usb_device *dev)
 		ldv_put_device(&dev->dev);
 }
 
+void ldv_v4l2_prio_init(struct v4l2_prio_state *global)
+{
+	memset(global, 0, sizeof(*global));
+}
+
 int ldv_v4l2_device_register(struct device *dev, struct v4l2_device *v4l2_dev)
 {
 	if (v4l2_dev == NULL)
@@ -111,14 +127,19 @@ int ldv_v4l2_device_register(struct device *dev, struct v4l2_device *v4l2_dev)
 	ldv_kref_init(&v4l2_dev->ref);
 	ldv_get_device(dev);
 	v4l2_dev->dev = dev;
-	if (!v4l2_dev->name[0])
-	if (!dev_get_drvdata(dev))
-		dev_set_drvdata(dev, v4l2_dev);
+	dev_set_drvdata(dev, v4l2_dev);
 	return 0;
 }
 
-void ldv_v4l2_prio_init(struct v4l2_prio_state *global)
+void ldv_v4l2_device_release(struct kref *kref)
 {
-	memset(global, 0, sizeof(*global));
+    struct v4l2_device *v4l2_dev = container_of(kref, struct v4l2_device, ref);
+    v4l2_dev->release(v4l2_dev);
 }
+
+int ldv_v4l2_device_put(struct v4l2_device *v4l2_dev)
+{
+    return ldv_kref_put(&v4l2_dev->ref, ldv_v4l2_device_release);
+}
+
 
