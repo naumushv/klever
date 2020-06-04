@@ -27,6 +27,12 @@ void ldv_usb_put_dev(struct usb_device *dev);
 int ldv_v4l2_device_register(struct device *dev, struct v4l2_device *v4l2_dev);
 void ldv_v4l2_prio_init(struct v4l2_prio_state *global);
 int ldv_v4l2_device_put(struct v4l2_device *v4l2_dev);
+void ldv_usb_put_dev(struct usb_device *dev);
+void ldv_v4l2_device_disconnect(struct v4l2_device *v4l2_dev);
+void ldv_dev_get_drvdata(const struct device *dev);
+void ldv_dev_set_drvdata(struct device *dev, void *data);
+void ldv_usb_set_intfdata(struct usb_interface *intf, void *data);
+void ldv_v4l2_device_disconnect(struct v4l2_device *v4l2_dev);
 
 }
 
@@ -123,7 +129,37 @@ around: call(int v4l2_device_register(..))
 	return ldv_v4l2_device_register($arg1, $arg2);
 }
 
-around: call(void v4l2_prio_init(struct v4l2_prio_state *global))
+around: call(void v4l2_prio_init(..))
 {
 	return ldv_v4l2_prio_initr($arg1);
+}
+
+around: call(void usb_put_dev(..))
+{
+	return ldv_usb_put_dev($arg1);
+}
+
+around: call(void v4l2_device_disconnect(..))
+{
+	return ldv_v4l2_device_disconnect($arg1);
+}
+
+around: call(void dev_get_drvdata(..))
+{
+	return ldv_dev_get_drvdata($arg1, $arg2);
+}
+
+around: call(void dev_set_drvdata(..))
+{
+	return ldv_dev_set_drvdata($arg1, $arg2);
+}
+
+around: call(void usb_set_intfdata(..))
+{
+	return ldv_usb_set_intfdata($arg1, $arg2);
+}
+
+around: call(void v4l2_device_disconnect(..))
+{
+	return ldv_v4l2_device_disconnect($arg1);
 }

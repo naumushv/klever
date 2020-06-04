@@ -142,4 +142,45 @@ int ldv_v4l2_device_put(struct v4l2_device *v4l2_dev)
     return ldv_kref_put(&v4l2_dev->ref, ldv_v4l2_device_release);
 }
 
+void ldv_usb_put_dev(struct usb_device *dev)
+{
+	if (dev)
+		ldv_put_device(&dev->dev);
+}
 
+void ldv_v4l2_device_disconnect(struct v4l2_device *v4l2_dev)
+{
+	if (v4l2_dev->dev == NULL)
+		return;
+
+	if (ldv_dev_get_drvdata(v4l2_dev->dev) == v4l2_dev)
+		ldv_dev_set_drvdata(v4l2_dev->dev, NULL);
+	ldv_put_device(v4l2_dev->dev);
+	v4l2_dev->dev = NULL;
+}
+
+void ldv_dev_get_drvdata(const struct device *dev)
+{
+	return dev->driver_data;
+}
+
+void ldv_dev_set_drvdata(struct device *dev, void *data)
+{
+	dev->driver_data = data;
+}
+
+void ldv_usb_set_intfdata(struct usb_interface *intf, void *data)
+{
+	ldv_dev_set_drvdata(&intf->dev, data);
+}
+
+void ldv_v4l2_device_disconnect(struct v4l2_device *v4l2_dev)
+{
+	if (v4l2_dev->dev == NULL)
+		return;
+
+	if (ldv_dev_get_drvdata(v4l2_dev->dev) == v4l2_dev)
+		ldv_dev_set_drvdata(v4l2_dev->dev, NULL);
+	ldv_put_device(v4l2_dev->dev);
+	v4l2_dev->dev = NULL;
+}
