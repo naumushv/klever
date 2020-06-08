@@ -8,6 +8,8 @@
 #include <media/v4l2-device.h>
 #include <linux/usb.h>
 #include <linux/device.h>
+#include <ldv/linux/device.h>
+#include <ldv/linux/slab.h>
 
 void ldv_kref_init(struct kref *kref)
 {
@@ -27,6 +29,16 @@ void ldv_refcount_set(refcount_t *r, int n)
 void ldv_refcount_inc(refcount_t *r)
 {
     r->refs.counter++;
+}
+
+void ldv_refcount_dec(refcount_t *r)
+{
+	ldv_refcount_set(r, -((int)(~0U >> 1)) - 1);
+}
+
+unsigned int ldv_refcount_read(const refcount_t *r)
+{
+	return r->refs.counter;
 }
 
 void ldv_kref_get(struct kref *kref)
@@ -127,8 +139,18 @@ int ldv_v4l2_device_register(struct device *dev, struct v4l2_device *v4l2_dev)
 	ldv_kref_init(&v4l2_dev->ref);
 	ldv_get_device(dev);
 	v4l2_dev->dev = dev;
-	dev_set_drvdata(dev, v4l2_dev);
+	ldv_dev_set_drvdata(dev, v4l2_dev);
 	return 0;
+}
+
+void ldv_video_device_release(struct video_device *vdev)
+{
+	kfree(vdev);
+}
+
+struct video_device *ldv_video_device_alloc(void)
+{
+	return ldv_kzalloc(sizeof(struct video_device), GFP_KERNEL);
 }
 
 void ldv_v4l2_device_release(struct kref *kref)
@@ -142,12 +164,6 @@ int ldv_v4l2_device_put(struct v4l2_device *v4l2_dev)
     return ldv_kref_put(&v4l2_dev->ref, ldv_v4l2_device_release);
 }
 
-void ldv_usb_put_dev(struct usb_device *dev)
-{
-	if (dev)
-		ldv_put_device(&dev->dev);
-}
-
 void ldv_v4l2_device_disconnect(struct v4l2_device *v4l2_dev)
 {
 	if (v4l2_dev->dev == NULL)
@@ -157,16 +173,6 @@ void ldv_v4l2_device_disconnect(struct v4l2_device *v4l2_dev)
 		ldv_dev_set_drvdata(v4l2_dev->dev, NULL);
 	ldv_put_device(v4l2_dev->dev);
 	v4l2_dev->dev = NULL;
-}
-
-void ldv_dev_get_drvdata(const struct device *dev)
-{
-	return dev->driver_data;
-}
-
-void ldv_dev_set_drvdata(struct device *dev, void *data)
-{
-	dev->driver_data = data;
 }
 
 void ldv_usb_set_intfdata(struct usb_interface *intf, void *data)
@@ -174,13 +180,21 @@ void ldv_usb_set_intfdata(struct usb_interface *intf, void *data)
 	ldv_dev_set_drvdata(&intf->dev, data);
 }
 
-void ldv_v4l2_device_disconnect(struct v4l2_device *v4l2_dev)
+void ldv_video_get(struct video_device *vdev)
 {
-	if (v4l2_dev->dev == NULL)
-		return;
+	ldv_get_device(&vdev->dev);
+}
 
-	if (ldv_dev_get_drvdata(v4l2_dev->dev) == v4l2_dev)
-		ldv_dev_set_drvdata(v4l2_dev->dev, NULL);
-	ldv_put_device(v4l2_dev->dev);
-	v4l2_dev->dev = NULL;
+void ldv_video_put(struct video_device *vdev)
+{
+	ldv_put_device(&vdev->dev);
+}
+
+static void ldv_v4l2_device_release(struct kref *ref)
+{
+	struct v4l2_device *v4l2_dev =
+		container_of(ref, struct v4l2_device, ref);
+
+	if (v4l2_dev->release)
+		v4l2_dev->release(v4l2_dev);
 }
