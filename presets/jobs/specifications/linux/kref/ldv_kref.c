@@ -11,19 +11,26 @@
 #include <ldv/linux/device.h>
 #include <ldv/linux/slab.h>
 
-void ldv_kref_init(struct kref *kref)
-{
-	kref->refcount.refs.counter = 1;
-}
-
-unsigned int ldv_kref_read(const struct kref *kref)
-{
-	return kref->refcount.refs.counter;
-}
 
 void ldv_refcount_set(refcount_t *r, int n)
 {
 	r->refs.counter = n;
+}
+
+unsigned int ldv_refcount_read(refcount_t *r)
+{
+	return r->refs.counter;
+}
+
+void ldv_kref_init(struct kref *kref)
+{
+//	kref->refcount.refs.counter = 1;
+  	ldv_refcount_set(&kref->refcount, 1);
+}
+
+unsigned int ldv_kref_read(const struct kref *kref)
+{
+	return ldv_refcount_read(&kref->refcount);
 }
 
 void ldv_refcount_inc(refcount_t *r)
@@ -33,13 +40,11 @@ void ldv_refcount_inc(refcount_t *r)
 
 void ldv_refcount_dec(refcount_t *r)
 {
-	ldv_refcount_set(r, -((int)(~0U >> 1)) - 1);
+  	ldv_assert(ldv_refcount_read(r) <= 0);
+  	r->refs.counter--;
+	//ldv_refcount_set(r, -((int)(~0U >> 1)) - 1);
 }
 
-unsigned int ldv_refcount_read(const refcount_t *r)
-{
-	return r->refs.counter;
-}
 
 void ldv_kref_get(struct kref *kref)
 {
@@ -49,9 +54,9 @@ void ldv_kref_get(struct kref *kref)
 
 int ldv_kref_put(struct kref *kref, void (*release)(struct kref *kref))
 {
-	ldv_assert(kref->refcount.refs.counter > 0);
-  	kref->refcount.refs.counter--;
-	if (kref->refcount.refs.counter == 0) {
+	ldv_assert(ldv_kref_read(kref) > 0);
+  	ldv_refcount_dec(&kref->refcount);
+	if (ldv_kref_read(kref) == 0) {
         release(kref);
         return 1;
 	}
@@ -188,13 +193,4 @@ void ldv_video_get(struct video_device *vdev)
 void ldv_video_put(struct video_device *vdev)
 {
 	ldv_put_device(&vdev->dev);
-}
-
-static void ldv_v4l2_device_release(struct kref *ref)
-{
-	struct v4l2_device *v4l2_dev =
-		container_of(ref, struct v4l2_device, ref);
-
-	if (v4l2_dev->release)
-		v4l2_dev->release(v4l2_dev);
 }

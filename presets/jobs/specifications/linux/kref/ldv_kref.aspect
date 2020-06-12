@@ -181,4 +181,3 @@ around: call(void v4l2_device_release(..))
 {
 	return ldv_v4l2_device_release($arg1);
 }
-
